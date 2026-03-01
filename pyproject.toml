@@ -1,16 +1,21 @@
 [project]
 name = "vault-tools"
-version = "1.0.0"
+version = "1.1.0"
 description = "CLI tools for working with Veeva Vault"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "requests",
     "prettytable",
     "python-dotenv",
+    "pandas>=2.0.0",
+    "pyarrow>=14.0.0",
+    "vapil @ git+https://github.com/veeva/vault-api-library-python.git",
+    "vault-direct-data-accelerators @ git+https://github.com/veeva/Vault-Direct-Data-API-Accelerators.git",
 ]
 
 [project.scripts]
 vault-log-analyzer = "vault_tools.log_analyzer:main"
+vault-ddapi = "vault_tools.ddapi_local.cli:main"
 
 [build-system]
 requires = ["hatchling"]

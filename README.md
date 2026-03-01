@@ -7,6 +7,7 @@ A collection of CLI tools for working with Veeva Vault, installable as a single 
 | Command | Description |
 |---|---|
 | [vault-log-analyzer](vault-log-analyzer/README.md) | Pull and analyze API logs, audit trails, and SDK runtime logs from Veeva Vault |
+| [vault-ddapi](vault-ddapi/README.md) | Sync Vault data (documents, users, objects, audit trail) to a local SQLite database via Direct Data API |
 
 ## Installation
 

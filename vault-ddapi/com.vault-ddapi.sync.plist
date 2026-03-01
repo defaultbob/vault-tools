@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd plist for vault-ddapi.
+
+  Install:
+    1. Edit the two REPLACE_WITH_ABSOLUTE_PATH placeholders below.
+    2. Copy to ~/Library/LaunchAgents/com.vault-ddapi.sync.plist
+    3. launchctl load ~/Library/LaunchAgents/com.vault-ddapi.sync.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.vault-ddapi.sync.plist
+    rm ~/Library/LaunchAgents/com.vault-ddapi.sync.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vault-ddapi.sync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Absolute path to run_sync.sh -->
+        <string>REPLACE_WITH_ABSOLUTE_PATH/vault-ddapi/run_sync.sh</string>
+    </array>
+
+    <!-- Run every 15 minutes -->
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <!-- Keep launchd from throttling repeated failures -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_WITH_ABSOLUTE_PATH/vault-ddapi/logs/launchd.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>REPLACE_WITH_ABSOLUTE_PATH/vault-ddapi/logs/launchd-error.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
