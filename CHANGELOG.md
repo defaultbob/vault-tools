@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.3] — 2026-03-01
+
+### Fixed
+- `vault-ddapi` now resolves `.env` by searching up from the current working directory (same as `vault-log-analyzer`), instead of hardcoding the path relative to the installed package location — fixes "Missing required .env variables" error when installed via `uv tool install`
+
+---
+
 ## [1.1.2] — 2026-03-01
 
 ### Fixed

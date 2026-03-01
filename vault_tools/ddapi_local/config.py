@@ -24,16 +24,13 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-
-# Root of the vault-tools project (three levels up from vault_tools/ddapi_local/config.py)
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+from dotenv import find_dotenv, load_dotenv
 
 
 class Config:
     def __init__(self, env_file: str | None = None):
-        # Default: root .env, overridable via DDAPI_ENV_FILE env var or argument
-        env_path = env_file or os.environ.get("DDAPI_ENV_FILE", str(_PROJECT_ROOT / ".env"))
+        # Search up from CWD (same strategy as log_analyzer), overridable via env var or argument
+        env_path = env_file or os.environ.get("DDAPI_ENV_FILE") or find_dotenv(usecwd=True)
         load_dotenv(env_path, override=True)
         self._validate()
 
@@ -159,5 +156,5 @@ class Config:
         if missing:
             raise SystemExit(
                 f"[ddapi-local] CRITICAL: Missing required .env variables: {', '.join(missing)}\n"
-                f"Add them to {_PROJECT_ROOT / '.env'}"
+                f"Add them to the .env file in your project root (or set DDAPI_ENV_FILE to its path)."
             )
