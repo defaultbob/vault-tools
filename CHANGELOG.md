@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.8] — 2026-03-01
+
+### Fixed
+- Vault part files are named `*.tar.gz.001` (not `*.tar.gz`) — extraction now strips the `.NNN` suffix and opens part files directly as gzip streams; multi-part archives are concatenated via a streaming reader before extraction
+
+---
+
 ## [1.1.7] — 2026-03-01
 
 ### Fixed

@@ -209,25 +209,70 @@ def download_direct_data(config: Config, extract_type: str,
 # ------------------------------------------------------------------ #
 
 def extract_archive(config: Config) -> bool:
-    """Extract all .tar.gz files from the downloads dir into extracted/."""
+    """Extract all Direct Data archives from the downloads dir into extracted/.
+
+    Vault part files are named *.tar.gz.001, *.tar.gz.002, etc.
+    Multi-part archives must be concatenated before extraction.
+    Single-part files (*.tar.gz.001 only) are extracted directly.
+    """
     download_dir = config.work_dir / "downloads"
     extract_dir = config.work_dir / "extracted"
     extract_dir.mkdir(parents=True, exist_ok=True)
 
-    archives = sorted(
-        list(download_dir.glob("*.tar.gz")) + list(download_dir.glob("*.tgz"))
-    )
-    if not archives:
-        log.error("No .tar.gz archives found in %s", download_dir)
+    # Collect all part files and group by base name (strip the .NNN suffix)
+    all_parts = sorted(download_dir.glob("*.tar.gz.*"))
+    # Also pick up plain .tar.gz files (no part suffix)
+    plain = sorted(list(download_dir.glob("*.tar.gz")) + list(download_dir.glob("*.tgz")))
+
+    if not all_parts and not plain:
+        log.error("No archive files found in %s", download_dir)
         return False
 
-    for archive in archives:
-        log.info("Extracting %s → %s", archive.name, extract_dir)
+    # Group parts by base archive name
+    from collections import defaultdict
+    groups: dict = defaultdict(list)
+    for p in all_parts:
+        # e.g. foo.tar.gz.001 → base = foo.tar.gz
+        base = p.name.rsplit(".", 1)[0]  # strip the .001 / .002 suffix
+        groups[base].append(p)
+    for p in plain:
+        if p.name not in groups:
+            groups[p.name].append(p)
+
+    for base_name, parts in sorted(groups.items()):
+        parts = sorted(parts)
+        log.info("Extracting %s (%d part(s)) → %s", base_name, len(parts), extract_dir)
         try:
-            with tarfile.open(archive, "r:gz") as tar:
-                tar.extractall(path=extract_dir)
+            if len(parts) == 1:
+                # Single part — open directly regardless of .001 suffix
+                with tarfile.open(fileobj=open(parts[0], "rb"), mode="r:gz") as tar:
+                    tar.extractall(path=extract_dir)
+            else:
+                # Multi-part — concatenate into a stream and extract
+                import io
+
+                class _CatStream(io.RawIOBase):
+                    """Concatenate multiple files as a single stream."""
+                    def __init__(self, paths):
+                        self._paths = list(paths)
+                        self._fh = open(self._paths.pop(0), "rb")
+
+                    def readinto(self, b):
+                        while True:
+                            n = self._fh.readinto(b)
+                            if n:
+                                return n
+                            self._fh.close()
+                            if not self._paths:
+                                return 0
+                            self._fh = open(self._paths.pop(0), "rb")
+
+                stream = io.BufferedReader(_CatStream(parts))
+                with tarfile.open(fileobj=stream, mode="r:gz") as tar:
+                    tar.extractall(path=extract_dir)
+
         except Exception as exc:
-            log.error("Failed to extract %s: %s", archive.name, exc, exc_info=True)
+            log.error("Failed to extract %s: %s", base_name, exc, exc_info=True)
             return False
 
     return True
