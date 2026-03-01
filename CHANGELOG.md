@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Removed nonexistent `vapil` Python dependency (VAPIL is Java-only; the accelerator package is self-contained)
 - Corrected accelerator package name to `vault-direct-data-api-accelerators` (matching its own `pyproject.toml`)
+- Added `tool.hatch.metadata.allow-direct-references = true` so hatchling accepts the git dependency
 
 ---
 

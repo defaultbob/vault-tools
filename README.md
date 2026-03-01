@@ -73,14 +73,10 @@ uv sync
 
 ## Credentials
 
-Tools that connect to Vault read credentials from a `.env` file at the repo root:
+All tools read from a single `.env` file at the repo root. Copy the template and fill in your values:
 
 ```bash
-VAULT_URL=https://your-vault.veevavault.com
-VAULT_VERSION=v25.3
-VAULT_USERNAME=you@domain.com
-VAULT_PASSWORD=yourpassword
-VAULT_SESSION=     # optional: pre-authenticated session ID
+cp .env.example .env
 ```
 
-`.env` is listed in `.gitignore` and will not be committed.
+`.env` is gitignored and will never be committed. See [.env.example](.env.example) for all available keys.
