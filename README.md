@@ -37,6 +37,22 @@ git clone https://github.com/defaultbob/vault-tools
 uv tool install ./vault-tools
 ```
 
+## Updating
+
+### Installed from Git
+
+```bash
+uv tool upgrade vault-tools
+```
+
+### Installed from a local copy
+
+```bash
+cd vault-tools
+git pull
+uv tool install ./vault-tools --force
+```
+
 ## Development
 
 ```bash
