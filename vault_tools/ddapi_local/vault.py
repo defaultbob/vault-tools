@@ -373,9 +373,16 @@ def load_into_db(config: Config, extract_type: str) -> bool:
         con.close()
 
 
+def _delete_by_ids(con: sqlite3.Connection, table: str, ids: list) -> None:
+    """Delete rows from table by id, batching to stay within SQLite's 999-variable limit."""
+    for i in range(0, len(ids), 999):
+        batch = ids[i:i + 999]
+        placeholders = ",".join("?" for _ in batch)
+        con.execute(f'DELETE FROM "{table}" WHERE id IN ({placeholders})', batch)
+
+
 def _apply_deletes(con: sqlite3.Connection, table: str, path: Path) -> None:
     """Delete rows from table whose id appears in the deletes CSV."""
-    # Ensure table exists before trying to delete (may not exist on first run edge cases)
     existing_tables = {
         r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
@@ -386,8 +393,7 @@ def _apply_deletes(con: sqlite3.Connection, table: str, path: Path) -> None:
     for chunk in pd.read_csv(path, chunksize=50_000, low_memory=False, usecols=["id"]):
         ids = chunk["id"].dropna().tolist()
         if ids:
-            placeholders = ",".join("?" for _ in ids)
-            con.execute(f'DELETE FROM "{table}" WHERE id IN ({placeholders})', ids)
+            _delete_by_ids(con, table, ids)
             log.debug("Deleted %d row(s) from %s", len(ids), table)
 
 
@@ -413,9 +419,7 @@ def _load_csv_to_table(con: sqlite3.Connection, table: str, path: Path,
         # Delete-then-insert so updates overwrite existing rows
         if "id" in chunk.columns:
             ids = chunk["id"].dropna().tolist()
-            if ids:
-                placeholders = ",".join("?" for _ in ids)
-                con.execute(f'DELETE FROM "{table}" WHERE id IN ({placeholders})', ids)
+            _delete_by_ids(con, table, ids)
 
         # SQLite limit is 999 bind variables; compute safe row batch size
         sql_chunksize = max(1, 999 // len(chunk.columns))

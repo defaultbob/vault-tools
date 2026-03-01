@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.3] — 2026-03-01
+
+### Fixed
+- `DELETE ... WHERE id IN (...)` now batches IDs in chunks of 999 to respect SQLite's bind-variable limit — fixes "too many SQL variables" on large tables (e.g. `Object/holiday__sys.csv` with 88k rows)
+- Extracted shared `_delete_by_ids` helper used by both `_load_csv_to_table` and `_apply_deletes`
+
+---
+
 ## [1.2.2] — 2026-03-01
 
 ### Fixed
