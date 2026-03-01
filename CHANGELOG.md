@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.2] — 2026-03-01
+
+### Fixed
+- Removed explicit `pandas` and `pyarrow` deps — they are pinned by the accelerator (`pandas~=2.2.3`, `pyarrow~=19.0.0`) and pulled in transitively; our looser pins were causing source builds on Python 3.14 (no wheels available, requires cmake)
+- Capped `requires-python` to `<3.14` to prevent installation on Python versions with no pre-built wheels for key dependencies
+
+---
+
 ## [1.1.1] — 2026-03-01
 
 ### Fixed
