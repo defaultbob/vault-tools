@@ -4,47 +4,21 @@ A CLI tool that pulls and analyzes API logs from Veeva Vault using the Vault RES
 
 ---
 
-## Distribution (uv / uvx)
+## Installation
 
-The tool is packaged for cross-platform distribution via [uv](https://docs.astral.sh/uv/).
-No Python installation or admin rights required on the target machine.
+This tool is part of the [vault-tools](../README.md) package. See the root README for install instructions.
 
-### Install uv (one-time, per machine)
-
-**Mac / Linux:**
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-**Windows:**
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-### Install from Git
+After installing, the `vault-log-analyzer` command is available directly:
 
 ```bash
-uv tool install "git+<repo-url>#subdirectory=vault-log-analyzer"
-vault-log-analyzer
+vault-log-analyzer api-usage
 ```
-
-### Install from a local copy
-
-```bash
-# From the workspace root:
-uv tool install ./vault-log-analyzer
-vault-log-analyzer
-```
-
-> Replace `<repo-url>` with your internal GitHub/GitLab URL.
-
----
 
 ## Local Development Setup
 
 ### 1. Install dependencies
 
-From the workspace root:
+From the repo root:
 
 ```bash
 uv sync

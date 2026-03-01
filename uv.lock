@@ -2,11 +2,6 @@ version = 1
 revision = 3
 requires-python = ">=3.10"
 
-[manifest]
-members = [
-    "vault-log-analyzer",
-]
-
 [[package]]
 name = "certifi"
 version = "2026.2.25"
@@ -160,9 +155,9 @@ wheels = [
 ]
 
 [[package]]
-name = "vault-log-analyzer"
+name = "vault-tools"
 version = "1.0.0"
-source = { editable = "vault-log-analyzer" }
+source = { editable = "." }
 dependencies = [
     { name = "prettytable" },
     { name = "python-dotenv" },

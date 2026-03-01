@@ -1,10 +1,10 @@
 # vault-tools
 
-A collection of CLI tools for working with Veeva Vault, packaged as a `uv` workspace.
+A collection of CLI tools for working with Veeva Vault, installable as a single `uv` package.
 
 ## Tools
 
-| Tool | Description |
+| Command | Description |
 |---|---|
 | [vault-log-analyzer](vault-log-analyzer/README.md) | Pull and analyze API logs, audit trails, and SDK runtime logs from Veeva Vault |
 
@@ -14,7 +14,7 @@ A collection of CLI tools for working with Veeva Vault, packaged as a `uv` works
 
 **Mac / Linux:**
 ```bash
-brew install uv 
+brew install uv
 # or
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
@@ -24,45 +24,39 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### Install all tools from Git
+### Install from Git
 
 ```bash
-uv tool install "git+<repo-url>"
+uv tool install "git+https://github.com/defaultbob/vault-tools"
 ```
 
-
-### Install all tools from a local copy
-
-```bash
-git clone <repo-url>
-cd vault-tools
-uv tool install ./vault-log-analyzer
-```
-
-### Install a specific tool from Git
+### Install from a local copy
 
 ```bash
-uv tool install "git+<repo-url>#subdirectory=vault-log-analyzer"
+git clone https://github.com/defaultbob/vault-tools
+uv tool install ./vault-tools
 ```
 
 ## Development
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/defaultbob/vault-tools
 cd vault-tools
-uv sync          # installs all workspace members into a shared .venv
+uv sync
 ```
 
 ## Adding a New Tool
 
-1. Create a subdirectory: `my-tool/`
-2. Add a `pyproject.toml` with `[project]` and `[project.scripts]`
-3. Add `"my-tool"` to `members` in the root `pyproject.toml`
-4. Run `uv sync`
+1. Add a module to `vault_tools/` (e.g. `vault_tools/my_tool.py`) with a `main()` entry point
+2. Add a script entry to `[project.scripts]` in `pyproject.toml`:
+   ```toml
+   my-tool = "vault_tools.my_tool:main"
+   ```
+3. Add a README to a matching subdirectory `my-tool/README.md` and link it in the table above
 
 ## Credentials
 
-Tools that connect to Vault read credentials from a `.env` file at the workspace root:
+Tools that connect to Vault read credentials from a `.env` file at the repo root:
 
 ```bash
 VAULT_URL=https://your-vault.veevavault.com
