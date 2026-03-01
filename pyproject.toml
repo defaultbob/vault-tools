@@ -1,6 +1,6 @@
 [project]
 name = "vault-tools"
-version = "1.1.0"
+version = "1.1.1"
 description = "CLI tools for working with Veeva Vault"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,8 +9,7 @@ dependencies = [
     "python-dotenv",
     "pandas>=2.0.0",
     "pyarrow>=14.0.0",
-    "vapil @ git+https://github.com/veeva/vault-api-library-python.git",
-    "vault-direct-data-accelerators @ git+https://github.com/veeva/Vault-Direct-Data-API-Accelerators.git",
+    "vault-direct-data-api-accelerators @ git+https://github.com/veeva/Vault-Direct-Data-API-Accelerators.git",
 ]
 
 [project.scripts]
