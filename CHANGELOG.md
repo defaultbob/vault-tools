@@ -6,6 +6,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.1] — 2026-03-01
+
+### Fixed
+- Manifest processing rewritten to match actual Vault archive format:
+  - Columns are `extract`, `extract_label`, `type`, `records`, `file` (not `filename`)
+  - Table name derived from `extract` field (e.g. `Object.activity__v` → `Object_activity__v`)
+  - `type=deletes` rows now correctly delete rows by `id` before any inserts
+  - Rows with empty `file` or `records=0` are skipped without error
+- `delete-then-insert` applied on all `updates` rows (handles both new records and changed records correctly)
+
+---
+
+## [1.2.0] — 2026-03-01
+
+### Changed
+- Full seed now catches up: after applying the most recent full extract it applies all incrementals generated since that full's `stop_time`, in chronological order
+- Incremental sync applies each available extract individually in order rather than batching them; `last_inc` in `_sync_meta` is updated after each one so a mid-run failure resumes from where it left off
+- `last_full` / `last_inc` now store the Vault extract's `stop_time` (not wall-clock time), making them exact resume points for the next query
+
+---
+
 ## [1.1.8] — 2026-03-01
 
 ### Fixed

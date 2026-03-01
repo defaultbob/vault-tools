@@ -1,9 +1,13 @@
 """
 db.py — SQLite helpers: WAL mode, _sync_meta table, row counts.
+
+State tracked in _sync_meta:
+  last_full   — stop_time of the full extract that was seeded
+  last_inc    — stop_time of the last incremental extract successfully applied
+                (used as start_time for the next incremental query)
 """
 
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .logger import get_logger
@@ -33,7 +37,7 @@ def open_db(db_path: Path) -> sqlite3.Connection:
 
 
 def get_last_sync(db_path: Path) -> dict:
-    """Return last_full and last_inc timestamps (or None if not yet set)."""
+    """Return last_full and last_inc stop_times (or None if not yet set)."""
     if not db_path.exists():
         return {"last_full": None, "last_inc": None}
     con = open_db(db_path)
@@ -46,24 +50,27 @@ def get_last_sync(db_path: Path) -> dict:
         con.close()
 
 
-def record_full_sync(db_path: Path) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+def record_full_sync(db_path: Path, stop_time: str) -> None:
+    """Record a completed full seed. stop_time is the full extract's stop_time from Vault."""
     con = open_db(db_path)
     try:
-        con.execute("UPDATE _sync_meta SET last_full=?, last_inc=? WHERE id=1", (now, now))
+        con.execute(
+            "UPDATE _sync_meta SET last_full=?, last_inc=? WHERE id=1",
+            (stop_time, stop_time),
+        )
         con.commit()
-        log.info("Recorded full sync at %s", now)
+        log.info("Recorded full sync — last position: %s", stop_time)
     finally:
         con.close()
 
 
-def record_incremental_sync(db_path: Path) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+def record_incremental_sync(db_path: Path, stop_time: str) -> None:
+    """Record a completed incremental. stop_time is the incremental's stop_time from Vault."""
     con = open_db(db_path)
     try:
-        con.execute("UPDATE _sync_meta SET last_inc=? WHERE id=1", (now,))
+        con.execute("UPDATE _sync_meta SET last_inc=? WHERE id=1", (stop_time,))
         con.commit()
-        log.info("Recorded incremental sync at %s", now)
+        log.info("Recorded incremental sync — last position: %s", stop_time)
     finally:
         con.close()
 

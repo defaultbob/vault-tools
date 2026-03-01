@@ -97,6 +97,24 @@ def _authenticate(config: Config) -> str:
 # List Direct Data files                                               #
 # ------------------------------------------------------------------ #
 
+def get_latest_full(config: Config) -> dict | None:
+    """Return metadata for the most-recent full extract, or None if unavailable."""
+    session_id = _authenticate(config)
+    items = _list_direct_data(config, session_id, _TYPE_FULL)
+    if not items:
+        return None
+    items.sort(key=lambda i: i.get("stop_time", ""), reverse=True)
+    return items[0]
+
+
+def get_incrementals_since(config: Config, since: str) -> list[dict]:
+    """Return incremental extract metadata since `since`, sorted oldest-first."""
+    session_id = _authenticate(config)
+    items = _list_direct_data(config, session_id, _TYPE_INCREMENTAL, start_time=since)
+    items.sort(key=lambda i: i.get("start_time", ""))
+    return items
+
+
 def _list_direct_data(config: Config, session_id: str, extract_type_filter: str,
                       start_time: str | None = None, stop_time: str | None = None) -> list[dict]:
     """GET /api/{version}/services/directdata/files
@@ -164,44 +182,50 @@ def _download_items(session_id: str, items: list[dict], download_dir: Path,
             _download_part(session_id, dl_url, dest)
 
 
-def download_direct_data(config: Config, extract_type: str,
-                         start_time: str | None, stop_time: str | None) -> bool:
-    """Authenticate, list, and download Direct Data files. Returns True on success."""
+def apply_item(config: Config, item: dict, extract_type: str) -> bool:
+    """Download, extract, load, and clean up a single Direct Data item.
+
+    Returns True on success. The caller is responsible for recording state.
+    extract_type should be 'full' or 'incremental' (used for DB upsert logic).
+    """
+    name = item.get("name", "?")
+    stop_time = item.get("stop_time", "?")
+    log.info("Applying %s extract: %s (stop_time=%s)", extract_type, name, stop_time)
+
+    download_dir = config.work_dir / "downloads"
+    extract_dir = config.work_dir / "extracted"
+
+    # Clean up previous run's files so we don't mix archives
+    _clean_dir(download_dir)
+    _clean_dir(extract_dir)
 
     def _run() -> bool:
         session_id = _authenticate(config)
         api_base = f"{config.vault_url}/api/{config.vault_api_version}"
-        download_dir = config.work_dir / "downloads"
         download_dir.mkdir(parents=True, exist_ok=True)
-
-        if extract_type == "full":
-            # Fetch all full extracts, pick the most recent
-            items = _list_direct_data(config, session_id, _TYPE_FULL)
-            if not items:
-                log.warning("No full Direct Data extracts available")
-                return False
-            items.sort(key=lambda i: i.get("stop_time", ""), reverse=True)
-            chosen = items[:1]
-            log.info("Selected full extract: %s (stop_time=%s)",
-                     chosen[0]["name"], chosen[0].get("stop_time"))
-        else:
-            # Fetch incremental files since last sync; server filters by time range
-            items = _list_direct_data(config, session_id, _TYPE_INCREMENTAL,
-                                      start_time=start_time, stop_time=stop_time)
-            if not items:
-                log.warning("No incremental Direct Data extracts available since %s", start_time)
-                return False
-            items.sort(key=lambda i: i.get("start_time", ""))
-            chosen = items
-            log.info("Selected %d incremental extract(s)", len(chosen))
-
-        _download_items(session_id, chosen, download_dir, api_base)
+        _download_items(session_id, [item], download_dir, api_base)
         return True
 
     try:
-        return _with_retry(_run, config, f"download_direct_data ({extract_type})")
+        _with_retry(_run, config, f"download {name}")
     except Exception:
         return False
+
+    if not extract_archive(config):
+        return False
+
+    if not load_into_db(config, extract_type):
+        return False
+
+    return True
+
+
+def _clean_dir(path: Path) -> None:
+    """Remove all files in a directory (not subdirs), creating it if needed."""
+    import shutil
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------ #
@@ -283,7 +307,15 @@ def extract_archive(config: Config) -> bool:
 # ------------------------------------------------------------------ #
 
 def load_into_db(config: Config, extract_type: str) -> bool:
-    """Load extracted CSV/Parquet data into SQLite. Returns True on success."""
+    """Load extracted data into SQLite using the manifest.
+
+    Manifest columns (actual Vault format):
+      extract       — dot-separated name e.g. Object.activity__v  → table name
+      extract_label — human label (ignored)
+      type          — 'updates' or 'deletes'
+      records       — row count (skip if 0 or file is empty)
+      file          — relative path to CSV within extracted dir (empty when records=0)
+    """
     extract_dir = config.work_dir / "extracted"
 
     _prime_wal(config)
@@ -293,21 +325,44 @@ def load_into_db(config: Config, extract_type: str) -> bool:
     con.execute("PRAGMA synchronous=NORMAL")
 
     try:
-        manifest_df = _read_manifest(extract_dir)
+        manifest_path = extract_dir / "manifest.csv"
+        if not manifest_path.exists():
+            log.error("manifest.csv not found in %s", extract_dir)
+            return False
 
-        if manifest_df is not None:
-            for _, row in manifest_df.iterrows():
-                _process_manifest_row(row, extract_dir, extract_type, con)
-        else:
-            for data_file in sorted(extract_dir.rglob("*.csv")):
-                if "metadata" in data_file.name.lower() or "manifest" in data_file.name.lower():
-                    continue
-                table = _filename_to_table(data_file.stem)
-                log.info("Loading %s → table %s", data_file.name, table)
-                _load_csv_to_table(con, table, data_file, extract_type)
+        manifest_df = pd.read_csv(manifest_path)
+        total = len(manifest_df)
+        loaded = 0
+
+        for _, row in manifest_df.iterrows():
+            rel_file = str(row.get("file", "") or "").strip()
+            records = int(row.get("records", 0) or 0)
+
+            # Skip empty extracts
+            if not rel_file or records == 0:
+                continue
+
+            file_path = extract_dir / rel_file
+            if not file_path.exists():
+                log.warning("Manifest file missing on disk: %s", rel_file)
+                continue
+
+            # Table name: replace dots and hyphens with underscores
+            extract_name = str(row.get("extract", file_path.stem))
+            table = extract_name.replace(".", "_").replace("-", "_")
+
+            row_type = str(row.get("type", "updates")).strip().lower()
+            log.info("Loading %s → %s (%s, %d records)", rel_file, table, row_type, records)
+
+            if row_type == "deletes":
+                _apply_deletes(con, table, file_path)
+            else:
+                _load_csv_to_table(con, table, file_path, create_if_missing=True)
+
+            loaded += 1
 
         con.commit()
-        log.info("DB load complete: %s", config.db_path)
+        log.info("DB load complete: %d/%d manifest entries applied → %s", loaded, total, config.db_path)
         return True
 
     except Exception as exc:
@@ -318,100 +373,51 @@ def load_into_db(config: Config, extract_type: str) -> bool:
         con.close()
 
 
-def _read_manifest(extract_dir: Path) -> pd.DataFrame | None:
-    for name in ["manifest.csv"]:
-        matches = list(extract_dir.rglob(name))
-        if matches:
-            try:
-                return pd.read_csv(matches[0])
-            except Exception:
-                pass
-    return None
-
-
-def _find_file(base: Path, name: str) -> Path | None:
-    matches = list(base.rglob(name))
-    return matches[0] if matches else None
-
-
-def _filename_to_table(stem: str) -> str:
-    """Convert a filename stem to a safe SQLite table name."""
-    table = stem.replace("-", "_")
-    for suffix in ("_full_directdata", "_incremental_directdata", "_log_directdata",
-                   "_full", "_incremental", "_log"):
-        if table.lower().endswith(suffix):
-            table = table[: -len(suffix)]
-            break
-    return table
-
-
-def _process_manifest_row(row: Any, extract_dir: Path, extract_type: str,
-                          con: sqlite3.Connection) -> None:
-    """Load a single entry from the manifest."""
-    filename = row.get("filename") or row.get("file_name") or row.get("name", "")
-    if not filename:
+def _apply_deletes(con: sqlite3.Connection, table: str, path: Path) -> None:
+    """Delete rows from table whose id appears in the deletes CSV."""
+    # Ensure table exists before trying to delete (may not exist on first run edge cases)
+    existing_tables = {
+        r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if table not in existing_tables:
+        log.debug("Skip deletes for %s — table does not exist yet", table)
         return
 
-    file_path = _find_file(extract_dir, Path(filename).name)
-    if file_path is None:
-        log.warning("Manifest file not found in extracted dir: %s", filename)
-        return
-
-    table = _filename_to_table(file_path.stem)
-    row_extract_type = str(row.get("extract_type", extract_type)).lower()
-    log.info("Loading %s → table %s (type=%s)", file_path.name, table, row_extract_type)
-
-    if file_path.suffix == ".parquet":
-        _load_parquet_to_table(con, table, file_path, row_extract_type)
-    else:
-        _load_csv_to_table(con, table, file_path, row_extract_type)
-
-
-def _load_csv_to_table(con: sqlite3.Connection, table: str, path: Path, extract_type: str) -> None:
-    first = True
-    for chunk in pd.read_csv(path, chunksize=50_000, low_memory=False):
-        _upsert_chunk(con, table, chunk, extract_type, create=first)
-        first = False
-
-
-def _load_parquet_to_table(con: sqlite3.Connection, table: str, path: Path, extract_type: str) -> None:
-    import pyarrow.parquet as pq
-    pf = pq.ParquetFile(path)
-    first = True
-    for batch in pf.iter_batches(batch_size=50_000):
-        chunk = batch.to_pandas()
-        _upsert_chunk(con, table, chunk, extract_type, create=first)
-        first = False
-
-
-def _upsert_chunk(con: sqlite3.Connection, table: str, df: pd.DataFrame,
-                  extract_type: str, create: bool) -> None:
-    """Write a DataFrame chunk into SQLite.
-
-    Full / log: append rows.
-    Incremental: delete existing rows by id, then insert (handles updates and deletes).
-    """
-    if df.empty:
-        return
-
-    df = df.copy()
-    df.columns = [c.replace(" ", "_").replace("-", "_") for c in df.columns]
-
-    if create:
-        cols_ddl = ", ".join(f'"{c}" TEXT' for c in df.columns)
-        con.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({cols_ddl})')
-        existing = {row[1] for row in con.execute(f'PRAGMA table_info("{table}")')}
-        for col in df.columns:
-            if col not in existing:
-                con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" TEXT')
-
-    if "incremental" in extract_type and "id" in df.columns:
-        ids = df["id"].dropna().tolist()
+    for chunk in pd.read_csv(path, chunksize=50_000, low_memory=False, usecols=["id"]):
+        ids = chunk["id"].dropna().tolist()
         if ids:
             placeholders = ",".join("?" for _ in ids)
             con.execute(f'DELETE FROM "{table}" WHERE id IN ({placeholders})', ids)
+            log.debug("Deleted %d row(s) from %s", len(ids), table)
 
-    df.to_sql(table, con, if_exists="append", index=False, method="multi", chunksize=1000)
+
+def _load_csv_to_table(con: sqlite3.Connection, table: str, path: Path,
+                       create_if_missing: bool = True) -> None:
+    """Append CSV rows into a SQLite table, upserting by id (delete-then-insert)."""
+    first = True
+    for chunk in pd.read_csv(path, chunksize=50_000, low_memory=False):
+        if chunk.empty:
+            continue
+        chunk = chunk.copy()
+        chunk.columns = [c.replace(" ", "_").replace("-", "_") for c in chunk.columns]
+
+        if first and create_if_missing:
+            cols_ddl = ", ".join(f'"{c}" TEXT' for c in chunk.columns)
+            con.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({cols_ddl})')
+            existing = {r[1] for r in con.execute(f'PRAGMA table_info("{table}")')}
+            for col in chunk.columns:
+                if col not in existing:
+                    con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" TEXT')
+            first = False
+
+        # Delete-then-insert so updates overwrite existing rows
+        if "id" in chunk.columns:
+            ids = chunk["id"].dropna().tolist()
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                con.execute(f'DELETE FROM "{table}" WHERE id IN ({placeholders})', ids)
+
+        chunk.to_sql(table, con, if_exists="append", index=False, method="multi", chunksize=1000)
 
 
 def _prime_wal(config: Config) -> None:
