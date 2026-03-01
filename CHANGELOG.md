@@ -6,6 +6,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.4] — 2026-03-01
+
+### Fixed
+- Replaced all imports of `common.services` and `accelerators.*` (not shipped in the accelerator wheel) with a self-contained implementation using `requests` directly
+- `vault-ddapi sync` now: authenticates via POST `/api/{version}/auth`, lists Direct Data files, streams downloads, extracts tar.gz, and loads CSV/Parquet into SQLite — no dependency on accelerator scripts that aren't installed
+- Removed now-unused `write_accelerator_configs`, `vapil_settings_path`, `connector_config_path` from `config.py`
+
+---
+
 ## [1.1.3] — 2026-03-01
 
 ### Fixed
