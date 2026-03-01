@@ -114,7 +114,7 @@ crontab -e
 Add (replace `/absolute/path/to/vault-tools`):
 
 ```
-*/15 * * * * /absolute/path/to/vault-tools/vault-ddapi/run_sync.sh >> /absolute/path/to/vault-tools/vault-ddapi/logs/cron.log 2>&1
+*/15 * * * * /Users/DavidMills/Documents/workspace/vault-tools/vault-ddapi/run_sync.sh >> //Users/DavidMills/Documents/workspace/vault-tools/vault-ddapi/logs/cron.log 2>&1
 ```
 
 ---

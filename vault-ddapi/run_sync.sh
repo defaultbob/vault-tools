@@ -10,9 +10,10 @@
 
 set -euo pipefail
 
-# Activate the vault-tools root venv (one level up from this script)
+# cd to project root so find_dotenv can locate .env
 VAULT_TOOLS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$VAULT_TOOLS_ROOT/.venv/bin/activate"
+cd "$VAULT_TOOLS_ROOT"
 
-# Run the sync, forwarding any extra arguments (e.g. --full)
-vault-ddapi sync "$@"
+# vault-ddapi is installed as a uv tool — use its absolute path so launchd
+# doesn't need PATH to be set correctly
+exec "$HOME/.local/bin/vault-ddapi" sync "$@"

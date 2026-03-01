@@ -20,8 +20,8 @@
 
     <key>ProgramArguments</key>
     <array>
-        <!-- Absolute path to run_sync.sh -->
-        <string>/Users/DavidMills/Documents/workspace/vault-tools/vault-ddapi/run_sync.sh</string>
+        <string>/Users/DavidMills/.local/bin/vault-ddapi</string>
+        <string>sync</string>
     </array>
 
     <!-- Run every 15 minutes -->
@@ -37,6 +37,9 @@
 
     <key>StandardErrorPath</key>
     <string>/Users/DavidMills/Documents/workspace/vault-tools/vault-ddapi/logs/launchd-error.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/DavidMills/Documents/workspace/vault-tools</string>
 
     <key>RunAtLoad</key>
     <false/>
