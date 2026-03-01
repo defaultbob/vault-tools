@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.7] — 2026-03-01
+
+### Fixed
+- Corrected all API calls against the Vault API v25.3 spec:
+  - `extract_type` query param now uses correct values (`full_directdata`, `incremental_directdata`) — server-side filtering, no longer fetching all 947 files for every sync
+  - `start_time` / `stop_time` query params sent on incremental list requests so the server returns only the relevant window
+  - `X-VaultAPI-ClientID: vault-tools-ddapi` header added to all requests (appears in Vault API Usage Logs)
+  - Incremental upsert now matches on `"incremental" in extract_type` to handle the `incremental_directdata` suffix correctly
+
+---
+
+## [1.1.6] — 2026-03-01
+
+### Fixed
+- Direct Data API does not accept an `extract_type` query parameter — it returns all files and the type is a field on each item (`full_directdata` / `incremental_directdata`). Now fetches the full catalogue and filters client-side: full sync picks the most-recent `full_directdata` entry; incremental picks all `incremental_directdata` entries with `start_time >= last_sync`, sorted oldest-first
+
+---
+
 ## [1.1.5] — 2026-03-01
 
 ### Fixed

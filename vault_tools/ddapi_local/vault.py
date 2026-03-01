@@ -8,12 +8,9 @@ Implements the full sync pipeline using the Vault REST API directly:
   4. Extract archive to WORK_DIR
   5. Load CSV/Parquet data into SQLite
 
-The accelerator package (vault-direct-data-api-accelerators) ships only
-common/utilities.py in its wheel — the scripts and services are not importable
-when installed via uv/pip. We implement the pipeline here using requests directly.
+API reference: https://developer.veevavault.com/api/25.3/#Direct_Data
 """
 
-import io
 import json
 import sqlite3
 import tarfile
@@ -28,6 +25,13 @@ from .config import Config
 from .logger import get_logger
 
 log = get_logger()
+
+# Sent on every request so it appears in Vault API Usage Logs
+_CLIENT_ID = "vault-tools-ddapi"
+
+# extract_type values returned by the API (and accepted as query params)
+_TYPE_FULL = "full_directdata"
+_TYPE_INCREMENTAL = "incremental_directdata"
 
 
 # ------------------------------------------------------------------ #
@@ -44,9 +48,21 @@ def _with_retry(fn, config: Config, label: str) -> Any:
             if attempt == config.max_retries:
                 log.error("%s failed after %d attempts: %s", label, config.max_retries, exc, exc_info=True)
                 raise
-            log.warning("%s attempt %d/%d failed: %s — retrying in %.0fs", label, attempt, config.max_retries, exc, delay)
+            log.warning("%s attempt %d/%d failed: %s — retrying in %.0fs",
+                        label, attempt, config.max_retries, exc, delay)
             time.sleep(delay)
             delay *= 2
+
+
+def _headers(session_id: str | None = None) -> dict:
+    """Build standard request headers."""
+    h = {
+        "Accept": "application/json",
+        "X-VaultAPI-ClientID": _CLIENT_ID,
+    }
+    if session_id:
+        h["Authorization"] = session_id
+    return h
 
 
 # ------------------------------------------------------------------ #
@@ -59,16 +75,18 @@ def _authenticate(config: Config) -> str:
     resp = requests.post(
         url,
         data={"username": config.vault_username, "password": config.vault_password},
-        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "X-VaultAPI-ClientID": _CLIENT_ID,
+        },
         timeout=60,
     )
     resp.raise_for_status()
     body = resp.json()
     if body.get("responseStatus") != "SUCCESS":
-        log.error(
-            "Vault auth failed.\nRequest: POST %s\nResponse:\n%s",
-            url, json.dumps(body, indent=2),
-        )
+        log.error("Vault auth failed.\nRequest: POST %s\nResponse:\n%s",
+                  url, json.dumps(body, indent=2))
         raise RuntimeError(f"Vault auth failed: {body.get('errors', [])}")
     session_id = body["sessionId"]
     log.info("Authenticated to Vault as %s", config.vault_username)
@@ -79,33 +97,30 @@ def _authenticate(config: Config) -> str:
 # List Direct Data files                                               #
 # ------------------------------------------------------------------ #
 
-def _list_direct_data(config: Config, session_id: str, extract_type: str,
-                      start_time: str | None, stop_time: str | None) -> list[dict]:
-    """GET /services/directdata/files — returns list of available file items."""
+def _list_direct_data(config: Config, session_id: str, extract_type_filter: str,
+                      start_time: str | None = None, stop_time: str | None = None) -> list[dict]:
+    """GET /api/{version}/services/directdata/files
+
+    extract_type_filter: full_directdata | incremental_directdata | log_directdata
+    start_time / stop_time: ISO 8601, e.g. 2024-01-15T07:00:00Z (optional)
+    """
     url = f"{config.vault_url}/api/{config.vault_api_version}/services/directdata/files"
-    params: dict = {"extract_type": extract_type.upper()}
+    params: dict = {"extract_type": extract_type_filter}
     if start_time:
         params["start_time"] = start_time
     if stop_time:
         params["stop_time"] = stop_time
 
-    resp = requests.get(
-        url,
-        params=params,
-        headers={"Authorization": session_id, "Accept": "application/json"},
-        timeout=60,
-    )
+    resp = requests.get(url, params=params, headers=_headers(session_id), timeout=60)
     resp.raise_for_status()
     body = resp.json()
     if body.get("responseStatus") != "SUCCESS":
-        log.error(
-            "Direct Data list failed.\nRequest: GET %s params=%s\nResponse:\n%s",
-            url, params, json.dumps(body, indent=2),
-        )
+        log.error("Direct Data list failed.\nRequest: GET %s params=%s\nResponse:\n%s",
+                  url, params, json.dumps(body, indent=2))
         raise RuntimeError(f"Direct Data list failed: {body.get('errors')}")
 
     items = body.get("data", [])
-    log.info("Found %d Direct Data file(s) for extract_type=%s", len(items), extract_type.upper())
+    log.info("Retrieved %d %s file(s) from Vault", len(items), extract_type_filter)
     return items
 
 
@@ -113,15 +128,13 @@ def _list_direct_data(config: Config, session_id: str, extract_type: str,
 # Download                                                             #
 # ------------------------------------------------------------------ #
 
-def _download_file_part(session_id: str, url: str, dest: Path) -> None:
+def _download_part(session_id: str, url: str, dest: Path) -> None:
     """Stream-download a single file part to dest."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(url, headers={"Authorization": session_id}, stream=True, timeout=300) as resp:
+    with requests.get(url, headers=_headers(session_id), stream=True, timeout=300) as resp:
         if not resp.ok:
-            log.error(
-                "Download failed.\nRequest: GET %s\nHTTP %s: %s",
-                url, resp.status_code, resp.text[:2000],
-            )
+            log.error("Download failed.\nRequest: GET %s\nHTTP %s:\n%s",
+                      url, resp.status_code, resp.text[:2000])
             resp.raise_for_status()
         with open(dest, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=1024 * 1024):
@@ -129,39 +142,60 @@ def _download_file_part(session_id: str, url: str, dest: Path) -> None:
     log.debug("Downloaded %s (%d bytes)", dest.name, dest.stat().st_size)
 
 
+def _download_items(session_id: str, items: list[dict], download_dir: Path,
+                    api_base: str) -> None:
+    """Download all file parts for a list of Direct Data items."""
+    for item in items:
+        parts = item.get("filepart_details") or []
+        if parts:
+            for part in parts:
+                dest = download_dir / part["filename"]
+                log.info("Downloading part %d/%d: %s (%s bytes)",
+                         part.get("filepart", 1), item.get("fileparts", 1),
+                         part["filename"], part.get("size", "?"))
+                _download_part(session_id, part["url"], dest)
+        else:
+            # Fallback: build URL from item name (part name format: {name}.001)
+            name = item["name"]
+            filename = item.get("filename", f"{name}.tar.gz")
+            dest = download_dir / filename
+            dl_url = f"{api_base}/services/directdata/files/{name}"
+            log.info("Downloading %s (%s bytes)", filename, item.get("size", "?"))
+            _download_part(session_id, dl_url, dest)
+
+
 def download_direct_data(config: Config, extract_type: str,
                          start_time: str | None, stop_time: str | None) -> bool:
-    """Authenticate, list, and download all Direct Data parts. Returns True on success."""
+    """Authenticate, list, and download Direct Data files. Returns True on success."""
 
     def _run() -> bool:
         session_id = _authenticate(config)
-        items = _list_direct_data(config, session_id, extract_type, start_time, stop_time)
-
-        if not items:
-            log.warning("No Direct Data files available for extract_type=%s (range: %s → %s)",
-                        extract_type, start_time, stop_time)
-            return False
-
+        api_base = f"{config.vault_url}/api/{config.vault_api_version}"
         download_dir = config.work_dir / "downloads"
         download_dir.mkdir(parents=True, exist_ok=True)
 
-        for item in items:
-            parts = item.get("filepart_details") or []
-            if not parts:
-                # Single-part — download via the item name
-                name = item["name"]
-                filename = item.get("filename", name)
-                dest = download_dir / filename
-                dl_url = f"{config.vault_url}/api/{config.vault_api_version}/services/directdata/files/{name}"
-                log.info("Downloading %s (%s bytes)", filename, item.get("size", "?"))
-                _download_file_part(session_id, dl_url, dest)
-            else:
-                for part in parts:
-                    dest = download_dir / part["filename"]
-                    log.info("Downloading part %d: %s (%s bytes)",
-                             part.get("filepart", 1), part["filename"], part.get("size", "?"))
-                    _download_file_part(session_id, part["url"], dest)
+        if extract_type == "full":
+            # Fetch all full extracts, pick the most recent
+            items = _list_direct_data(config, session_id, _TYPE_FULL)
+            if not items:
+                log.warning("No full Direct Data extracts available")
+                return False
+            items.sort(key=lambda i: i.get("stop_time", ""), reverse=True)
+            chosen = items[:1]
+            log.info("Selected full extract: %s (stop_time=%s)",
+                     chosen[0]["name"], chosen[0].get("stop_time"))
+        else:
+            # Fetch incremental files since last sync; server filters by time range
+            items = _list_direct_data(config, session_id, _TYPE_INCREMENTAL,
+                                      start_time=start_time, stop_time=stop_time)
+            if not items:
+                log.warning("No incremental Direct Data extracts available since %s", start_time)
+                return False
+            items.sort(key=lambda i: i.get("start_time", ""))
+            chosen = items
+            log.info("Selected %d incremental extract(s)", len(chosen))
 
+        _download_items(session_id, chosen, download_dir, api_base)
         return True
 
     try:
@@ -180,7 +214,9 @@ def extract_archive(config: Config) -> bool:
     extract_dir = config.work_dir / "extracted"
     extract_dir.mkdir(parents=True, exist_ok=True)
 
-    archives = list(download_dir.glob("*.tar.gz")) + list(download_dir.glob("*.tgz"))
+    archives = sorted(
+        list(download_dir.glob("*.tar.gz")) + list(download_dir.glob("*.tgz"))
+    )
     if not archives:
         log.error("No .tar.gz archives found in %s", download_dir)
         return False
@@ -205,7 +241,6 @@ def load_into_db(config: Config, extract_type: str) -> bool:
     """Load extracted CSV/Parquet data into SQLite. Returns True on success."""
     extract_dir = config.work_dir / "extracted"
 
-    # Ensure DB exists with WAL mode
     _prime_wal(config)
 
     con = sqlite3.connect(str(config.db_path))
@@ -213,21 +248,16 @@ def load_into_db(config: Config, extract_type: str) -> bool:
     con.execute("PRAGMA synchronous=NORMAL")
 
     try:
-        # Read metadata for column types if available
-        metadata_df = _read_metadata(extract_dir)
-
-        # Read manifest to get ordered list of files to load
         manifest_df = _read_manifest(extract_dir)
 
         if manifest_df is not None:
             for _, row in manifest_df.iterrows():
-                _process_manifest_row(row, extract_dir, extract_type, con, metadata_df, config)
+                _process_manifest_row(row, extract_dir, extract_type, con)
         else:
-            # No manifest — load all CSV/Parquet files we find
             for data_file in sorted(extract_dir.rglob("*.csv")):
                 if "metadata" in data_file.name.lower() or "manifest" in data_file.name.lower():
                     continue
-                table = data_file.stem.replace("-", "_")
+                table = _filename_to_table(data_file.stem)
                 log.info("Loading %s → table %s", data_file.name, table)
                 _load_csv_to_table(con, table, data_file, extract_type)
 
@@ -243,24 +273,14 @@ def load_into_db(config: Config, extract_type: str) -> bool:
         con.close()
 
 
-def _read_metadata(extract_dir: Path) -> pd.DataFrame | None:
-    for candidate in ["metadata_full.csv", "metadata.csv"]:
-        p = _find_file(extract_dir, candidate)
-        if p:
+def _read_manifest(extract_dir: Path) -> pd.DataFrame | None:
+    for name in ["manifest.csv"]:
+        matches = list(extract_dir.rglob(name))
+        if matches:
             try:
-                return pd.read_csv(p)
+                return pd.read_csv(matches[0])
             except Exception:
                 pass
-    return None
-
-
-def _read_manifest(extract_dir: Path) -> pd.DataFrame | None:
-    p = _find_file(extract_dir, "manifest.csv")
-    if p:
-        try:
-            return pd.read_csv(p)
-        except Exception:
-            pass
     return None
 
 
@@ -269,11 +289,20 @@ def _find_file(base: Path, name: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def _filename_to_table(stem: str) -> str:
+    """Convert a filename stem to a safe SQLite table name."""
+    table = stem.replace("-", "_")
+    for suffix in ("_full_directdata", "_incremental_directdata", "_log_directdata",
+                   "_full", "_incremental", "_log"):
+        if table.lower().endswith(suffix):
+            table = table[: -len(suffix)]
+            break
+    return table
+
+
 def _process_manifest_row(row: Any, extract_dir: Path, extract_type: str,
-                          con: sqlite3.Connection, metadata_df: pd.DataFrame | None,
-                          config: Config) -> None:
+                          con: sqlite3.Connection) -> None:
     """Load a single entry from the manifest."""
-    # Manifest columns vary; try common names
     filename = row.get("filename") or row.get("file_name") or row.get("name", "")
     if not filename:
         return
@@ -283,14 +312,7 @@ def _process_manifest_row(row: Any, extract_dir: Path, extract_type: str,
         log.warning("Manifest file not found in extracted dir: %s", filename)
         return
 
-    # Derive table name from filename stem (strip extract-type prefix/suffix)
-    table = file_path.stem.replace("-", "_")
-    # Strip common suffixes like _full, _incremental
-    for suffix in ("_full", "_incremental", "_log"):
-        if table.lower().endswith(suffix):
-            table = table[: -len(suffix)]
-            break
-
+    table = _filename_to_table(file_path.stem)
     row_extract_type = str(row.get("extract_type", extract_type)).lower()
     log.info("Loading %s → table %s (type=%s)", file_path.name, table, row_extract_type)
 
@@ -301,7 +323,6 @@ def _process_manifest_row(row: Any, extract_dir: Path, extract_type: str,
 
 
 def _load_csv_to_table(con: sqlite3.Connection, table: str, path: Path, extract_type: str) -> None:
-    """Load a CSV into a SQLite table, chunked."""
     first = True
     for chunk in pd.read_csv(path, chunksize=50_000, low_memory=False):
         _upsert_chunk(con, table, chunk, extract_type, create=first)
@@ -309,7 +330,6 @@ def _load_csv_to_table(con: sqlite3.Connection, table: str, path: Path, extract_
 
 
 def _load_parquet_to_table(con: sqlite3.Connection, table: str, path: Path, extract_type: str) -> None:
-    """Load a Parquet file into a SQLite table, chunked."""
     import pyarrow.parquet as pq
     pf = pq.ParquetFile(path)
     first = True
@@ -323,27 +343,24 @@ def _upsert_chunk(con: sqlite3.Connection, table: str, df: pd.DataFrame,
                   extract_type: str, create: bool) -> None:
     """Write a DataFrame chunk into SQLite.
 
-    Full / log extracts: append rows.
-    Incremental extracts: delete-then-insert on id column (if present).
+    Full / log: append rows.
+    Incremental: delete existing rows by id, then insert (handles updates and deletes).
     """
     if df.empty:
         return
 
-    # Sanitise column names
     df = df.copy()
     df.columns = [c.replace(" ", "_").replace("-", "_") for c in df.columns]
 
     if create:
-        # CREATE TABLE IF NOT EXISTS with TEXT columns; ALTER for new ones later
         cols_ddl = ", ".join(f'"{c}" TEXT' for c in df.columns)
         con.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ({cols_ddl})')
-        # Add any missing columns (schema evolution)
         existing = {row[1] for row in con.execute(f'PRAGMA table_info("{table}")')}
         for col in df.columns:
             if col not in existing:
                 con.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" TEXT')
 
-    if extract_type == "incremental" and "id" in df.columns:
+    if "incremental" in extract_type and "id" in df.columns:
         ids = df["id"].dropna().tolist()
         if ids:
             placeholders = ",".join("?" for _ in ids)
@@ -353,7 +370,7 @@ def _upsert_chunk(con: sqlite3.Connection, table: str, df: pd.DataFrame,
 
 
 def _prime_wal(config: Config) -> None:
-    """Ensure DB file and parent dirs exist with WAL mode before any writes."""
+    """Ensure DB and parent dirs exist with WAL mode before first write."""
     config.db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(config.db_path))
     con.execute("PRAGMA journal_mode=WAL")
