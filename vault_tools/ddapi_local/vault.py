@@ -14,6 +14,7 @@ when installed via uv/pip. We implement the pipeline here using requests directl
 """
 
 import io
+import json
 import sqlite3
 import tarfile
 import time
@@ -64,8 +65,11 @@ def _authenticate(config: Config) -> str:
     resp.raise_for_status()
     body = resp.json()
     if body.get("responseStatus") != "SUCCESS":
-        errors = body.get("errors", [])
-        raise RuntimeError(f"Vault auth failed: {errors}")
+        log.error(
+            "Vault auth failed.\nRequest: POST %s\nResponse:\n%s",
+            url, json.dumps(body, indent=2),
+        )
+        raise RuntimeError(f"Vault auth failed: {body.get('errors', [])}")
     session_id = body["sessionId"]
     log.info("Authenticated to Vault as %s", config.vault_username)
     return session_id
@@ -79,7 +83,7 @@ def _list_direct_data(config: Config, session_id: str, extract_type: str,
                       start_time: str | None, stop_time: str | None) -> list[dict]:
     """GET /services/directdata/files — returns list of available file items."""
     url = f"{config.vault_url}/api/{config.vault_api_version}/services/directdata/files"
-    params: dict = {"extract_type": extract_type}
+    params: dict = {"extract_type": extract_type.upper()}
     if start_time:
         params["start_time"] = start_time
     if stop_time:
@@ -94,10 +98,14 @@ def _list_direct_data(config: Config, session_id: str, extract_type: str,
     resp.raise_for_status()
     body = resp.json()
     if body.get("responseStatus") != "SUCCESS":
+        log.error(
+            "Direct Data list failed.\nRequest: GET %s params=%s\nResponse:\n%s",
+            url, params, json.dumps(body, indent=2),
+        )
         raise RuntimeError(f"Direct Data list failed: {body.get('errors')}")
 
     items = body.get("data", [])
-    log.info("Found %d Direct Data file(s) for extract_type=%s", len(items), extract_type)
+    log.info("Found %d Direct Data file(s) for extract_type=%s", len(items), extract_type.upper())
     return items
 
 
@@ -109,7 +117,12 @@ def _download_file_part(session_id: str, url: str, dest: Path) -> None:
     """Stream-download a single file part to dest."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     with requests.get(url, headers={"Authorization": session_id}, stream=True, timeout=300) as resp:
-        resp.raise_for_status()
+        if not resp.ok:
+            log.error(
+                "Download failed.\nRequest: GET %s\nHTTP %s: %s",
+                url, resp.status_code, resp.text[:2000],
+            )
+            resp.raise_for_status()
         with open(dest, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=1024 * 1024):
                 fh.write(chunk)

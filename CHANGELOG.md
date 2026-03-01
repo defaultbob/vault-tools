@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.5] — 2026-03-01
+
+### Fixed
+- `extract_type` sent to Vault API is now uppercased (`FULL`, `INCREMENTAL`) — API rejects lowercase values with `INVALID_DATA`
+- Full API response body (pretty-printed JSON) is now logged at ERROR level on any auth or list failure, making future API errors self-diagnosing
+
+---
+
 ## [1.1.4] — 2026-03-01
 
 ### Fixed
