@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.4] — 2026-03-01
+
+### Changed
+- Authenticate once per sync run and reuse the session for all API calls (list, download) — avoids `API_LIMIT_EXCEEDED` on auth endpoint (limit: 1 auth/minute)
+- `authenticate()` is now a public function; `get_latest_full`, `get_incrementals_since`, and `apply_item` all accept an explicit `session_id` parameter
+
+---
+
 ## [1.2.3] — 2026-03-01
 
 ### Fixed

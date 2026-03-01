@@ -69,8 +69,12 @@ def _headers(session_id: str | None = None) -> dict:
 # Authentication                                                       #
 # ------------------------------------------------------------------ #
 
-def _authenticate(config: Config) -> str:
-    """POST /api/{version}/auth — returns session ID."""
+def authenticate(config: Config) -> str:
+    """POST /api/{version}/auth — returns session ID.
+
+    Call once per sync run and reuse the returned session_id for all
+    subsequent API calls to avoid hitting the auth rate limit.
+    """
     url = f"{config.vault_url}/api/{config.vault_api_version}/auth"
     resp = requests.post(
         url,
@@ -97,9 +101,8 @@ def _authenticate(config: Config) -> str:
 # List Direct Data files                                               #
 # ------------------------------------------------------------------ #
 
-def get_latest_full(config: Config) -> dict | None:
+def get_latest_full(config: Config, session_id: str) -> dict | None:
     """Return metadata for the most-recent full extract, or None if unavailable."""
-    session_id = _authenticate(config)
     items = _list_direct_data(config, session_id, _TYPE_FULL)
     if not items:
         return None
@@ -107,9 +110,8 @@ def get_latest_full(config: Config) -> dict | None:
     return items[0]
 
 
-def get_incrementals_since(config: Config, since: str) -> list[dict]:
+def get_incrementals_since(config: Config, session_id: str, since: str) -> list[dict]:
     """Return incremental extract metadata since `since`, sorted oldest-first."""
-    session_id = _authenticate(config)
     items = _list_direct_data(config, session_id, _TYPE_INCREMENTAL, start_time=since)
     items.sort(key=lambda i: i.get("start_time", ""))
     return items
@@ -182,7 +184,7 @@ def _download_items(session_id: str, items: list[dict], download_dir: Path,
             _download_part(session_id, dl_url, dest)
 
 
-def apply_item(config: Config, item: dict, extract_type: str) -> bool:
+def apply_item(config: Config, session_id: str, item: dict, extract_type: str) -> bool:
     """Download, extract, load, and clean up a single Direct Data item.
 
     Returns True on success. The caller is responsible for recording state.
@@ -200,7 +202,6 @@ def apply_item(config: Config, item: dict, extract_type: str) -> bool:
     _clean_dir(extract_dir)
 
     def _run() -> bool:
-        session_id = _authenticate(config)
         api_base = f"{config.vault_url}/api/{config.vault_api_version}"
         download_dir.mkdir(parents=True, exist_ok=True)
         _download_items(session_id, [item], download_dir, api_base)

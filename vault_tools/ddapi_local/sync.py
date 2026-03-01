@@ -16,37 +16,39 @@ Sync strategy:
 from .config import Config
 from .db import get_last_sync, record_full_sync, record_incremental_sync
 from .logger import get_logger
-from .vault import apply_item, get_incrementals_since, get_latest_full
+from .vault import apply_item, authenticate, get_incrementals_since, get_latest_full
 
 log = get_logger()
 
 
 def run(config: Config, force_full: bool = False) -> None:
-    """Main sync entry point."""
+    """Main sync entry point. Authenticates once and reuses the session."""
     db_exists = config.db_path.exists()
     force_full = force_full or config.extract_type == "full"
 
+    session_id = authenticate(config)
+
     if not db_exists or force_full:
-        _full_seed(config)
+        _full_seed(config, session_id)
     else:
-        _incremental_sync(config)
+        _incremental_sync(config, session_id)
 
 
 # ------------------------------------------------------------------ #
 # Full seed                                                            #
 # ------------------------------------------------------------------ #
 
-def _full_seed(config: Config) -> None:
+def _full_seed(config: Config, session_id: str) -> None:
     log.info("Starting FULL seed → %s", config.db_path)
 
-    full_item = get_latest_full(config)
+    full_item = get_latest_full(config, session_id)
     if not full_item:
         log.error("Full seed aborted: no full extract available from Vault")
         return
 
     log.info("Full extract: %s (stop_time=%s)", full_item["name"], full_item.get("stop_time"))
 
-    if not apply_item(config, full_item, extract_type="full"):
+    if not apply_item(config, session_id, full_item, extract_type="full"):
         log.error("Full seed aborted: failed to apply full extract")
         return
 
@@ -55,7 +57,7 @@ def _full_seed(config: Config) -> None:
     log.info("Full seed applied. Catching up incrementals since %s …", full_stop)
 
     # Apply all incrementals that have been generated since the full's stop_time
-    _apply_incrementals(config, since=full_stop, context="catch-up")
+    _apply_incrementals(config, session_id, since=full_stop, context="catch-up")
 
     log.info("Full seed complete.")
 
@@ -64,30 +66,30 @@ def _full_seed(config: Config) -> None:
 # Incremental sync                                                     #
 # ------------------------------------------------------------------ #
 
-def _incremental_sync(config: Config) -> None:
+def _incremental_sync(config: Config, session_id: str) -> None:
     meta = get_last_sync(config.db_path)
     since = meta.get("last_inc") or meta.get("last_full")
 
     if not since:
         log.warning("No last sync position found — falling back to full seed")
-        _full_seed(config)
+        _full_seed(config, session_id)
         return
 
     log.info("Starting INCREMENTAL sync since %s", since)
-    _apply_incrementals(config, since=since, context="incremental")
+    _apply_incrementals(config, session_id, since=since, context="incremental")
 
 
 # ------------------------------------------------------------------ #
 # Shared: apply a sequence of incrementals                             #
 # ------------------------------------------------------------------ #
 
-def _apply_incrementals(config: Config, since: str, context: str) -> None:
+def _apply_incrementals(config: Config, session_id: str, since: str, context: str) -> None:
     """Fetch and apply all incremental extracts since `since`, oldest-first.
 
     Records stop_time in the DB after each successful apply so a failure
     mid-sequence resumes from the last completed item, not the beginning.
     """
-    items = get_incrementals_since(config, since=since)
+    items = get_incrementals_since(config, session_id, since=since)
 
     if not items:
         log.info("No new incremental extracts available since %s", since)
@@ -100,7 +102,7 @@ def _apply_incrementals(config: Config, since: str, context: str) -> None:
         item_stop = item.get("stop_time", "")
         log.info("[%d/%d] Applying incremental: %s (stop_time=%s)", i, len(items), name, item_stop)
 
-        if not apply_item(config, item, extract_type="incremental"):
+        if not apply_item(config, session_id, item, extract_type="incremental"):
             log.error(
                 "Incremental sync stopped at %s — will resume from %s on next run",
                 name, item.get("start_time", since),

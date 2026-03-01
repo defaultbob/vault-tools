@@ -1,6 +1,6 @@
 [project]
 name = "vault-tools"
-version = "1.2.3"
+version = "1.2.4"
 description = "CLI tools for working with Veeva Vault"
 requires-python = ">=3.11,<3.14"
 dependencies = [
