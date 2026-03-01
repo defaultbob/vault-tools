@@ -10,12 +10,12 @@ Supports:
   runtime     – Download SDK runtime logs
 
 Usage:
-  python vault_log_analyzer.py api-usage
-  python vault_log_analyzer.py api-usage --date 2025-02-20
-  python vault_log_analyzer.py multi-day --days 7
-  python vault_log_analyzer.py audit --list
-  python vault_log_analyzer.py audit --type login_audit_trail
-  python vault_log_analyzer.py runtime --date 2025-02-20
+  vault-log-analyzer api-usage
+  vault-log-analyzer api-usage --date 2025-02-20
+  vault-log-analyzer multi-day --days 7
+  vault-log-analyzer audit --list
+  vault-log-analyzer audit --type login_audit_trail
+  vault-log-analyzer runtime --date 2025-02-20
 
 Auth (pick one):
   Export VAULT_SESSION=<session_id>        (fastest)
@@ -522,7 +522,7 @@ examples:
 
 
 def cmd_all(args):
-    """Run all analyses with sensible defaults: yesterday's API log, login audit, runtime log."""
+    """Run all analyses: last 30 days of API logs, login audit, yesterday's runtime log."""
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     session   = get_session(args)
 
@@ -547,10 +547,9 @@ def cmd_all(args):
             fn(args)
         sections.append((title, cap.getvalue()))
 
-    _run("[1/4] API USAGE — yesterday",    cmd_api_usage)
-    _run("[2/4] API USAGE — last 30 days", cmd_multi_day)
-    _run("[3/4] AUDIT TRAIL — login",      cmd_audit)
-    _run("[4/4] SDK RUNTIME LOG",          cmd_runtime)
+    _run("[1/3] API USAGE — last 30 days", cmd_multi_day)
+    _run("[2/3] AUDIT TRAIL — login",      cmd_audit)
+    _run("[3/3] SDK RUNTIME LOG",          cmd_runtime)
 
     _write_md(sections, f"vault_logs_{date.today().isoformat()}.md")
 
