@@ -21,29 +21,22 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### Run from a shared Git repo (internal distribution)
+### Install from Git
 
 ```bash
-# Run directly — uv resolves Python + all dependencies automatically
-uvx --from git+https://github.com/your-org/vault-tools vault-log-analyzer
-
-# Or install persistently as a tool
-uv tool install git+https://github.com/your-org/vault-tools
+uv tool install "git+<repo-url>#subdirectory=vault-log-analyzer"
 vault-log-analyzer
 ```
 
-### Run from a local copy
+### Install from a local copy
 
 ```bash
-# Clone / copy the repo, then:
-uvx --from . vault-log-analyzer
-
-# Or install locally
-uv tool install .
+# From the workspace root:
+uv tool install ./vault-log-analyzer
 vault-log-analyzer
 ```
 
-> Replace `https://github.com/your-org/vault-tools` with your internal GitHub/GitLab URL.
+> Replace `<repo-url>` with your internal GitHub/GitLab URL.
 
 ---
 
@@ -51,18 +44,17 @@ vault-log-analyzer
 
 ### 1. Install dependencies
 
+From the workspace root:
+
 ```bash
-pip install requests prettytable python-dotenv
-# or with uv:
 uv sync
 ```
 
 ### 2. Configure credentials
 
-Copy `.env` and fill in your details:
+Create a `.env` file at the workspace root:
 
 ```bash
-# .env (already created — just fill in VAULT_PASSWORD or VAULT_SESSION)
 VAULT_URL=https://your-vault.veevavault.com
 VAULT_VERSION=v25.3
 VAULT_USERNAME=you@domain.com
@@ -70,7 +62,7 @@ VAULT_PASSWORD=yourpassword
 VAULT_SESSION=           # optional: pre-authenticated session ID
 ```
 
-The script loads `.env` automatically. You can also override any value at runtime with CLI flags.
+The tool loads `.env` automatically. You can also override any value at runtime with CLI flags.
 
 > `.env` is listed in `.gitignore` and will not be committed.
 

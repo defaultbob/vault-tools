@@ -4,3 +4,7 @@
 /CONTEXT.md
 /GEMINI.md
 /Vault API Spec.json
+.python-version
+/venv/
+**/.venv/
+**/__pycache__/
