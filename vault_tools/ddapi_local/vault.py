@@ -417,7 +417,9 @@ def _load_csv_to_table(con: sqlite3.Connection, table: str, path: Path,
                 placeholders = ",".join("?" for _ in ids)
                 con.execute(f'DELETE FROM "{table}" WHERE id IN ({placeholders})', ids)
 
-        chunk.to_sql(table, con, if_exists="append", index=False, method="multi", chunksize=1000)
+        # SQLite limit is 999 bind variables; compute safe row batch size
+        sql_chunksize = max(1, 999 // len(chunk.columns))
+        chunk.to_sql(table, con, if_exists="append", index=False, method="multi", chunksize=sql_chunksize)
 
 
 def _prime_wal(config: Config) -> None:

@@ -6,6 +6,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.2] — 2026-03-01
+
+### Fixed
+- `_load_csv_to_table`: compute safe SQL batch size dynamically as `max(1, 999 // num_columns)` to stay within SQLite's 999 bind-variable limit — fixes "too many SQL variables" error on wide tables (e.g. `Metadata/object.csv`)
+
+---
+
 ## [1.2.1] — 2026-03-01
 
 ### Fixed
