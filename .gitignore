@@ -10,5 +10,5 @@
 **/__pycache__/
 *.DS_Store
 log.txt
-vault-ddapi/logs/ddapi.log
+vault-ddapi/logs/
 data/
